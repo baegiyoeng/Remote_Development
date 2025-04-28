@@ -7,10 +7,11 @@ import threading
 import os
 import select
 import serial
+import glob
 
 # ————— Configuration —————
 DEFAULT_BAUD   = 115200
-GPIO_PORT      = "/dev/ttyACM0"
+#GPIO_PORT      = "/dev/ttyACM0"
 DELAY          = 0.1
 USBIP_LOG_MAX  = 10   # keep last N log lines
 BOX_WIDTH      = 60   # interface box width
@@ -181,10 +182,19 @@ def run_mode(ser, seq, name):
         ser.read_all()
     usbip_log(f"[OK] {name} done")
 
+def find_acm_port():
+    ports = glob.glob("/dev/ttyACM*")
+    ports.sort()
+    return ports[0] if ports else None
+
 def gpio_flow():
+    port = find_acm_port()
+    if not port:
+        usbip_log("[GPIO ERROR] No ACM port found")
+        return
     try:
-        ser = serial.Serial(GPIO_PORT, baudrate=DEFAULT_BAUD, timeout=1, write_timeout=1)
-        usbip_log(f"[GPIO] {GPIO_PORT}@{DEFAULT_BAUD} connected")
+        ser = serial.Serial(port, baudrate=DEFAULT_BAUD, timeout=1, write_timeout=1)
+        usbip_log(f"[GPIO] {port}@{DEFAULT_BAUD} connected")
     except Exception as e:
         usbip_log(f"[GPIO ERROR] {e}")
         return
