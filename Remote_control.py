@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-import subprocess, time, re, sys, threading, os, select
+import subprocess
+import time
+import re
+import sys
+import threading
+import os
+import select
 import serial
 
 # ————— Configuration —————
