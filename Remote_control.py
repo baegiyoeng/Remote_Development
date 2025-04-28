@@ -129,6 +129,7 @@ def watchdog_loop(server_ip, initial_busids):
     retries = {b: 0 for b in known}
     MAX_RETRY = 3
     while True:
+        time.sleep(1)
         outp = subprocess.run([
             "usbip","port"
         ], stdout=subprocess.PIPE,
