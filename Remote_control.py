@@ -35,10 +35,12 @@ with open(LOG_FILE, 'w', encoding='utf-8') as _:
     pass
 
 def usbip_log(msg: str):
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
     entry = f"{msg}"
     usbip_logs.append(entry)
     if len(usbip_logs) > USBIP_LOG_MAX:
         usbip_logs.pop(0)
+    entry = f"{timestamp} {entry}"
     with open(LOG_FILE, 'a', encoding='utf-8') as f:
         f.write(entry + "\n")
 
