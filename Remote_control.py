@@ -63,6 +63,7 @@ def render_menu():
 # ————— USB/IP Functions —————
 def list_exported_busids(server_ip):
     subprocess.run(["modprobe","vhci-hcd"], stderr=subprocess.DEVNULL)
+    time.sleep(DELAY)
     try:
         out = subprocess.run([
             "usbip","list","-r",server_ip
@@ -154,7 +155,7 @@ def watchdog_loop(server_ip, initial_busids):
                     retries[b] = 0
                 except subprocess.CalledProcessError as e:
                     usbip_log(f"[WATCHDOG] Failed attach new {b}: {e.stderr.strip()}")
-        time.sleep(3)
+        time.sleep(DELAY)
 
 # ————— GPIO Control —————
 def run_mode(ser, seq, name):
@@ -222,7 +223,7 @@ if __name__ == "__main__":
         if attached:
             usbip_log("[INFO] Attach complete. Entering GPIO control.")
             break
-        time.sleep(1)
+        time.sleep(DELAY)
     else:
         usbip_log("usbip server의 연결을 실패했습니다.")
         render_menu()
@@ -234,7 +235,7 @@ if __name__ == "__main__":
     # Initial render before GPIO menu
     render_menu()
 
-    time.sleep(2)
+    time.sleep(3)
     # GPIO menu loop
     gpio_flow()
 
