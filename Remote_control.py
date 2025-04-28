@@ -14,6 +14,7 @@ GPIO_PORT      = "/dev/ttyACM0"
 DELAY          = 0.1
 USBIP_LOG_MAX  = 10   # keep last N log lines
 BOX_WIDTH      = 60   # interface box width
+LOG_FILE       = "Remote_control.txt"
 
 # ————— Command Sequences —————
 POWEROFF    = ['gpio iomask ff','gpio iodir 00','gpio writeall 00']
@@ -30,10 +31,16 @@ STR_MODE    = ['gpio iomask c0','gpio writeall c0',
 # ————— USB/IP Logging —————
 usbip_logs = []
 
+with open(LOG_FILE, 'w', encoding='utf-8') as _:
+    pass
+
 def usbip_log(msg: str):
-    usbip_logs.append(msg)
+    entry = f"{msg}"
+    usbip_logs.append(entry)
     if len(usbip_logs) > USBIP_LOG_MAX:
         usbip_logs.pop(0)
+    with open(LOG_FILE, 'a', encoding='utf-8') as f:
+        f.write(entry + "\n")
 
 def clear_screen():
     os.system('cls' if os.name=='nt' else 'clear')
@@ -235,6 +242,7 @@ if __name__ == "__main__":
         render_menu()
         sys.exit(1)
 
+    time.sleep(2)
     # Start watchdog thread
     threading.Thread(target=watchdog_loop, args=(server_ip,attached), daemon=True).start()
 
