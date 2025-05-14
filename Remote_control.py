@@ -29,6 +29,44 @@ USB3FWDN    = ['gpio iomask 8f','gpio writeall 88']
 STR_MODE    = ['gpio iomask c0','gpio writeall c0',
                'gpio writeall 40','gpio writeall c0','gpio writeall 80']
 
+# ————— Server List —————
+def select_server(servers):
+    # 1) 연결 가능 여부 조사
+    statuses = []
+    for ip in servers:
+        try:
+            res = subprocess.run(
+                ["usbip","list","-r",ip],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=1
+            )
+            statuses.append(res.returncode == 0)
+        except Exception:
+            statuses.append(False)
+
+    # 2) 목록 출력
+    print("Available USB/IP servers:")
+    for idx, (ip, ok) in enumerate(zip(servers, statuses), start=1):
+        mark = "[O]" if ok else "[X]"
+        print(f"  {idx}) {ip} {mark}")
+    print("  0) Exit")
+
+    # 3) 선택 루프
+    while True:
+        choice = input(f"Select server [1-{len(servers)}] or 0 to exit: ").strip()
+        if choice == "0":
+            print("All done. Goodbye!")
+            sys.exit(0)
+        if choice.isdigit():
+            n = int(choice)
+            if 1 <= n <= len(servers):
+                if not statuses[n-1]:
+                    print(f"{servers[n-1]} 서버는 연결 불가 상태입니다. 다른 번호를 선택하세요.")
+                    continue
+                return servers[n-1]
+        print(f"Invalid Number: '{choice}'. Please enter a number between 0 and 1~{len(servers)}")
+
 # ————— USB/IP Logging —————
 usbip_logs = []
 
@@ -36,21 +74,18 @@ with open(LOG_FILE, 'w', encoding='utf-8') as _:
     pass
 
 def usbip_log(msg: str):
+    """멀티라인 메시지도 각 줄마다 타임스탬프를 붙여서 파일에 저장."""
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-    entry = f"{msg}"
-    usbip_logs.append(entry)
-    if len(usbip_logs) > USBIP_LOG_MAX:
-        usbip_logs.pop(0)
-    entry = f"{timestamp} {entry}"
     with open(LOG_FILE, 'a', encoding='utf-8') as f:
-        f.write(entry + "\n")
+        for line in msg.splitlines():
+            f.write(f"{timestamp} {line}\n")
 
 def clear_screen():
     os.system('cls' if os.name=='nt' else 'clear')
 
 def render_menu():
     clear_screen()
-    # Top box: GPIO Control Menu
+    # Top box: GPIO Control Menu only
     print("+" + "-"*(BOX_WIDTH-2) + "+")
     title = " GPIO Control Menu "
     print("|" + title.center(BOX_WIDTH-2) + "|")
@@ -63,17 +98,6 @@ def render_menu():
     ]:
         line = f" {idx}) {name}"
         print("|" + line.ljust(BOX_WIDTH-2) + "|")
-    print("+" + "-"*(BOX_WIDTH-2) + "+")
-
-    # Bottom box: USB/IP Log
-    print("+" + "-"*(BOX_WIDTH-2) + "+")
-    log_title = " USB/IP Log "
-    print("|" + log_title.center(BOX_WIDTH-2) + "|")
-    print("+" + "-"*(BOX_WIDTH-2) + "+")
-    for line in usbip_logs:
-        print("| " + line[:BOX_WIDTH-4].ljust(BOX_WIDTH-4) + " |")
-    for _ in range(USBIP_LOG_MAX - len(usbip_logs)):
-        print("| " + " "*(BOX_WIDTH-4) + " |")
     print("+" + "-"*(BOX_WIDTH-2) + "+")
 
 # ————— USB/IP Functions —————
@@ -102,11 +126,13 @@ def attach_all(server_ip, busids):
             usbip_log(f"[ATTACH] Success: {b}")
             attached.append(b)
         except subprocess.CalledProcessError as e:
-            err = e.stderr.lower()
+            err = (e.stderr or "").lower()
             if "import device" in err:
-                usbip_log("이 보드는 다른 사용자가 점유하고 있습니다")
-                sys.exit(1)
-            usbip_log(f"[ATTACH] Failed: {b}")
+                # 점유된 장치는 건너뛰고 계속 진행
+                usbip_log(f"[ATTACH] Skipped busy (already in use): {b}")
+                continue
+            # 그 외 실패는 상세히 기록
+            usbip_log(f"[ATTACH] Failed: {b} ({e.stderr.strip()})")
     return attached
 
 def detach_all_ports():
@@ -171,7 +197,7 @@ def watchdog_loop(server_ip, initial_busids):
                     known.add(b)
                     retries[b] = 0
                 except subprocess.CalledProcessError as e:
-                    usbip_log(f"[WATCHDOG] Failed attach new {b}: {e.stderr.strip()}")
+                    usbip_log(f"[WATCHDOG] Failed attach new {b}:\n{e.stderr}")
         time.sleep(DELAY)
 
 # ————— GPIO Control —————
@@ -231,11 +257,13 @@ def gpio_flow():
 
 # ————— Main Flow —————
 if __name__ == "__main__":
-    while True:
-        server_ip = input("Server IP for usbip attach: ").strip()
-        if server_ip:
-            break
-        print("Server IP is required.")
+    servers = [
+        "tcremote.telechips.com",
+        "10.10.27.132"
+    ]
+    # 2) 메뉴로 선택
+    server_ip = select_server(servers)
+    print(f"→ You selected: {server_ip}")
 
     exportable = list_exported_busids(server_ip)
     if not exportable:
@@ -262,7 +290,7 @@ if __name__ == "__main__":
     # Initial render before GPIO menu
     render_menu()
 
-    time.sleep(3)
+    time.sleep(1)
     # GPIO menu loop
     gpio_flow()
 
