@@ -8,6 +8,8 @@ import os
 import select
 import serial
 import glob
+import socket
+import requests
 
 # ————— Configuration —————
 DEFAULT_BAUD   = 115200
@@ -16,6 +18,7 @@ DELAY          = 0.1
 USBIP_LOG_MAX  = 10   # keep last N log lines
 BOX_WIDTH      = 60   # interface box width
 LOG_FILE       = "Remote_control.txt"
+API_URL       = "http://10.10.77.137:5001/api/data"
 
 # ————— Command Sequences —————
 POWEROFF    = ['gpio iomask ff','gpio iodir 00','gpio writeall 00']
@@ -56,28 +59,60 @@ def get_serial_ports():
 
 # ————— Server List —————
 def select_server(servers):
-    # 1) 연결 가능 여부 조사
+    # 1) API에서 할당 현황 불러오기
+    try:
+        r = requests.get(API_URL, timeout=2)
+        r.raise_for_status()
+        allocs = r.json().get("data", [])
+    except:
+        allocs = []
+
+    # 2) 각 서버별 상태 판정
     statuses = []
     for ip in servers:
+        # A) exportable bus ID 목록 조회
         try:
-            res = subprocess.run(
+            out = subprocess.run(
                 ["usbip","list","-r",ip],
-                stdout=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
-                timeout=1
-            )
-            statuses.append(res.returncode == 0)
-        except Exception:
-            statuses.append(False)
+                universal_newlines=True,
+                timeout=1,
+                check=True
+            ).stdout
+            busids = re.findall(r"^\s*(\d+-[\d\.]+):", out, re.MULTILINE)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            # 실패 또는 타임아웃 시 장치 없음으로 간주
+            busids = []
 
-    # 2) 목록 출력
+        has_devices = bool(busids)
+        # B) API 점유자 확인
+        holders = [r["source_ip"] for r in allocs if r["value"] == ip]
+
+        # C) free 여부
+        free = has_devices and not holders
+
+        # 저장: (free, holders리스트, has_devices)
+        statuses.append((free, holders, has_devices))
+
+    # 3) 목록 출력
     print("Available USB/IP servers:")
-    for idx, (ip, ok) in enumerate(zip(servers, statuses), start=1):
-        mark = "[O]" if ok else "[X]"
-        print(f"  {idx}) {ip} {mark}")
+    for idx, ip in enumerate(servers, 1):
+        free, holders, has_dev = statuses[idx-1]
+        if free:
+            mark, info = "[O]", ""
+        else:
+            mark = "[X]"
+            if holders:
+                info = f" ← in use by {holders[0]}"
+            elif not has_dev:
+                info = " ← no exportable devices"
+            else:
+                info = ""
+        print(f"  {idx}) {ip} {mark}{info}")
     print("  0) Exit")
 
-    # 3) 선택 루프
+    # 4) 선택 루프
     while True:
         choice = input(f"Select server [1-{len(servers)}] or 0 to exit: ").strip()
         if choice == "0":
@@ -86,11 +121,18 @@ def select_server(servers):
         if choice.isdigit():
             n = int(choice)
             if 1 <= n <= len(servers):
-                if not statuses[n-1]:
-                    print(f"{servers[n-1]} 서버는 연결 불가 상태입니다. 다른 번호를 선택하세요.")
-                    continue
-                return servers[n-1]
-        print(f"Invalid Number: '{choice}'. Please enter a number between 0 and 1~{len(servers)}")
+                free, holders, has_dev = statuses[n-1]
+                if free:
+                    return servers[n-1]
+                # 선택 불가 사유만 다시 안내
+                if holders:
+                    print(f"{servers[n-1]} 서버는 이미 {holders[0]} 클라이언트가 사용 중입니다.")
+                elif not has_dev:
+                    print(f"{servers[n-1]} 서버에는 연결 가능한 장치가 없습니다.")
+                else:
+                    print(f"{servers[n-1]} 서버는 연결 불가 상태입니다.")
+                continue
+        print(f"Invalid choice '{choice}'. Enter 0 or 1~{len(servers)}.")
 
 # ————— USB/IP Logging —————
 usbip_logs = []
@@ -288,6 +330,23 @@ def gpio_flow():
     ser.close()
     usbip_log("[GPIO] Port closed")
 
+def report_to_api(server_ip, api_url=API_URL):
+    """
+    서버 IP와 내 IP를 API 서버에 POST로 보고합니다.
+    """
+    client_ip = socket.gethostbyname(socket.gethostname())
+    payload = {
+        "source_ip": client_ip,
+        "value":     server_ip,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    }
+    try:
+        r = requests.post(api_url, json=payload, timeout=2)
+        r.raise_for_status()
+        usbip_log(f"[REPORT] OK → {payload}")
+    except Exception as e:
+        usbip_log(f"[REPORT] FAIL → {e}")
+
 # ————— Main Flow —————
 if __name__ == "__main__":
     servers = [
@@ -311,6 +370,8 @@ if __name__ == "__main__":
         attached = attach_all(server_ip, exportable)
         if attached:
             usbip_log("[INFO] Attach complete. Entering GPIO control.")
+            # → 여기서 API에 보고
+            report_to_api(server_ip)
             break
         time.sleep(DELAY)
     else:
@@ -332,5 +393,13 @@ if __name__ == "__main__":
     # Detach & exit
     detach_all_ports()
     usbip_log("Detached all & exiting")
+    # API 서버에서도 내 기록 삭제
+    client_ip = socket.gethostbyname(socket.gethostname())
+    try:
+        d = requests.delete(f"{API_URL}/{client_ip}", timeout=2)
+        d.raise_for_status()
+        usbip_log(f"[REPORT] DELETE OK → {client_ip}")
+    except Exception as e:
+        usbip_log(f"[REPORT] DELETE FAIL → {e}")
     render_menu()
     print("All done. Goodbye!")
