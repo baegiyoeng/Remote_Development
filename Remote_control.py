@@ -29,6 +29,31 @@ USB3FWDN    = ['gpio iomask 8f','gpio writeall 88']
 STR_MODE    = ['gpio iomask c0','gpio writeall c0',
                'gpio writeall 40','gpio writeall c0','gpio writeall 80']
 
+SERVER_IP = None   # 전역으로 선택된 서버 IP 저장
+
+def get_attached_devices():
+    """
+    현재 `usbip port` 로 붙어 있는 디바이스의 BusID 리스트를 리턴.
+    """
+    try:
+        out = subprocess.run(
+            ["usbip","port"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            universal_newlines=True,
+            check=True
+        ).stdout
+        return re.findall(r"usbip://[^/]+/([\d\-\.]+)", out)
+    except:
+        return []
+
+def get_serial_ports():
+    """
+    /dev/ttyACM* 와 /dev/ttyUSB* 중 실제 존재하는 포트를 리스트로 반환
+    """
+    ports = glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*")
+    return sorted(ports)
+
 # ————— Server List —————
 def select_server(servers):
     # 1) 연결 가능 여부 조사
@@ -85,6 +110,14 @@ def clear_screen():
 
 def render_menu():
     clear_screen()
+    # ─── 상단: 서버 IP & 실제 시리얼 포트 ────────────────────────
+    print(f"Server IP: {SERVER_IP or '<none>'}")
+    serials = get_serial_ports()
+    if serials:
+        print("Serial ports: " + ", ".join(serials))
+    else:
+        print("Serial ports: None")
+    print()  # 빈 줄
     # Top box: GPIO Control Menu only
     print("+" + "-"*(BOX_WIDTH-2) + "+")
     title = " GPIO Control Menu "
@@ -264,6 +297,8 @@ if __name__ == "__main__":
     # 2) 메뉴로 선택
     server_ip = select_server(servers)
     print(f"→ You selected: {server_ip}")
+
+    SERVER_IP = server_ip
 
     exportable = list_exported_busids(server_ip)
     if not exportable:
