@@ -1,0 +1,26 @@
+#!/usr/bin/expect -f
+
+set dev "/dev/ttyUSB1"
+
+# 포트 열기
+if {![file exists $dev]} {
+    exit 1
+}
+
+spawn minicom -C test_log/test_log1.txt -D $dev -o
+
+# 감시 루프
+while {1} {
+    # 포트 존재 여부 확인
+    if {![file exists $dev]} {
+        break
+    }
+    expect {
+        "tcc805x login:" {
+            exec echo "root\r" > $dev
+            exp_continue
+        }
+    }
+}
+
+interact

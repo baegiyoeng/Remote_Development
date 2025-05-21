@@ -10,6 +10,7 @@ import serial
 import glob
 import socket
 import requests
+import signal
 
 # ————— Configuration —————
 DEFAULT_BAUD   = 115200
@@ -347,6 +348,28 @@ def report_to_api(server_ip, api_url=API_URL):
     except Exception as e:
         usbip_log(f"[REPORT] FAIL → {e}")
 
+# ————— Signal Handler —————
+def handle_sigint(signum, frame):
+    usbip_log("[INFO] SIGINT received, cleaning up...")
+    detach_all_ports()
+    try:
+        if not get_serial_ports():
+            detach_all_ports()
+    except Exception as e:
+        usbip_log(f"[ERROR] Failed to detach: {e}")
+
+    client_ip = socket.gethostbyname(socket.gethostname())
+    try:
+        d = requests.delete(f"{API_URL}/{client_ip}", timeout=2)
+        d.raise_for_status()
+        usbip_log(f"[REPORT] DELETE OK → {client_ip}")
+    except Exception as e:
+        usbip_log(f"[REPORT] DELETE FAIL → {e}")
+    print("All done. Goodbye!")
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, handle_sigint)
+
 # ————— Main Flow —————
 if __name__ == "__main__":
     servers = [
@@ -402,4 +425,8 @@ if __name__ == "__main__":
     except Exception as e:
         usbip_log(f"[REPORT] DELETE FAIL → {e}")
     render_menu()
+
+    # serial port가 남아 있는지 한번 더 점검
+    if not get_serial_ports():
+        detach_all_ports()
     print("All done. Goodbye!")
